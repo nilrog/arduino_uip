@@ -240,7 +240,7 @@ UIPClient::read(uint8_t *buf, size_t size)
       memhandle* p = &data->packets_in[0];
       if (*p == NOBLOCK)
         return 0;
-      int read;
+      uint16_t read;
       do
         {
           read = UIPEthernet.network.readPacket(*p,0,buf+size-remain,remain);
