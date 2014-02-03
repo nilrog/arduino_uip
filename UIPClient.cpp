@@ -467,6 +467,12 @@ UIPClient::_allocateData()
   for ( uint8_t sock = 0; sock < UIP_CONNS; sock++ )
     {
       uip_userdata_t* data = &UIPClient::all_data[sock];
+#ifdef UIPETHERNET_DEBUG_CLIENT
+      Serial.print(F("_allocateData state: "));
+      Serial.print(data->state);
+      Serial.print(F(", for sock: "));
+      Serial.println(sock);
+#endif
       if (!data->state)
         {
           data->state = sock | UIP_CLIENT_CONNECTED;
