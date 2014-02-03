@@ -246,7 +246,7 @@ UIPClient::read(uint8_t *buf, size_t size)
       memhandle* p = &data->packets_in[0];
       if (*p == NOBLOCK)
         return 0;
-      uint16_t read;
+      unsigned int read;
       do
         {
           read = UIPEthernet.network.readPacket(*p,0,buf+size-remain,remain);
@@ -473,6 +473,12 @@ UIPClient::_allocateData()
   for ( uint8_t sock = 0; sock < UIP_CONNS; sock++ )
     {
       uip_userdata_t* data = &UIPClient::all_data[sock];
+#ifdef UIPETHERNET_DEBUG_CLIENT
+      Serial.print(F("_allocateData state: "));
+      Serial.print(data->state);
+      Serial.print(F(", for sock: "));
+      Serial.println(sock);
+#endif
       if (!data->state)
         {
           data->state = sock | UIP_CLIENT_CONNECTED;
