@@ -55,6 +55,7 @@ UIPClient::UIPClient(uip_userdata_t* conn_data) :
 int
 UIPClient::connect(IPAddress ip, uint16_t port)
 {
+  stop();
   uip_ipaddr_t ipaddr;
   uip_ip_addr(ipaddr, ip);
   struct uip_conn* conn = uip_connect(&ipaddr, htons(port));
@@ -67,7 +68,6 @@ UIPClient::connect(IPAddress ip, uint16_t port)
             {
               data = (uip_userdata_t*) conn->appstate;
 #ifdef UIPETHERNET_DEBUG_CLIENT
-
               Serial.print(F("connected, state: "));
               Serial.print(data->state);
               Serial.print(F(", first packet in: "));
@@ -101,10 +101,14 @@ UIPClient::connect(const char *host, uint16_t port)
 void
 UIPClient::stop()
 {
-  if (data)
+  if (data && data->state)
     {
+#ifdef UIPETHERNET_DEBUG_CLIENT
+      Serial.println(F("before stop(), with data"));
+      _dumpAllData();
+#endif
       _flushBlocks(&data->packets_in[0]);
-      if (data->state & UIP_CLIENT_CLOSED)
+      if (data->state & UIP_CLIENT_REMOTECLOSED)
         {
           data->state = 0;
         }
@@ -112,7 +116,17 @@ UIPClient::stop()
         {
           data->state |= UIP_CLIENT_CLOSE;
         }
+#ifdef UIPETHERNET_DEBUG_CLIENT
+      Serial.println(F("after stop()"));
+      _dumpAllData();
+#endif
     }
+#ifdef UIPETHERNET_DEBUG_CLIENT
+  else
+    {
+      Serial.println(F("stop(), data: NULL"));
+    }
+#endif
   data = NULL;
   UIPEthernet.tick();
 }
@@ -132,7 +146,7 @@ UIPClient::operator==(const UIPClient& rhs)
 UIPClient::operator bool()
 {
   UIPEthernet.tick();
-  return data && (!(data->state & UIP_CLIENT_CLOSED) || data->packets_in[0] != NOBLOCK);
+  return data && (!(data->state & UIP_CLIENT_REMOTECLOSED) || data->packets_in[0] != NOBLOCK);
 }
 
 size_t
@@ -157,7 +171,7 @@ UIPClient::_write(uip_userdata_t* u, const uint8_t *buf, size_t size)
 #endif
   repeat:
   UIPEthernet.tick();
-  if (u && !(u->state & (UIP_CLIENT_CLOSE | UIP_CLIENT_CLOSED)))
+  if (u && !(u->state & (UIP_CLIENT_CLOSE | UIP_CLIENT_REMOTECLOSED)))
     {
       memhandle* p = _currentBlock(&u->packets_out[0]);
       if (*p == NOBLOCK)
@@ -254,11 +268,11 @@ UIPClient::read(uint8_t *buf, size_t size)
             {
               remain -= read;
               _eatBlock(p);
-              if (uip_stopped(&uip_conns[data->state & UIP_CLIENT_SOCKETS]) && !(data->state & (UIP_CLIENT_CLOSE | UIP_CLIENT_CLOSED)))
+              if (uip_stopped(&uip_conns[data->state & UIP_CLIENT_SOCKETS]) && !(data->state & (UIP_CLIENT_CLOSE | UIP_CLIENT_REMOTECLOSED)))
                 data->state |= UIP_CLIENT_RESTART;
               if (*p == NOBLOCK)
                 {
-                  if (data->state & UIP_CLIENT_CLOSED)
+                  if (data->state & UIP_CLIENT_REMOTECLOSED)
                     {
                       data->state = 0;
                       data = NULL;
@@ -326,6 +340,7 @@ UIPClient::uip_callback()
     {
 #ifdef UIPETHERNET_DEBUG_CLIENT
       Serial.println(F("UIPClient uip_connected"));
+      _dumpAllData();
 #endif
       u = (uip_userdata_t*) _allocateData();
       if (u)
@@ -333,7 +348,7 @@ UIPClient::uip_callback()
           uip_conn->appstate = u;
 #ifdef UIPETHERNET_DEBUG_CLIENT
           Serial.print(F("UIPClient allocated state: "));
-          Serial.println(u->state);
+          Serial.println(u->state,BIN);
 #endif
         }
 #ifdef UIPETHERNET_DEBUG_CLIENT
@@ -349,7 +364,7 @@ UIPClient::uip_callback()
           Serial.print(F("UIPClient uip_newdata, uip_len:"));
           Serial.println(uip_len);
 #endif
-          if (uip_len && !(u->state & (UIP_CLIENT_CLOSE | UIP_CLIENT_CLOSED)))
+          if (uip_len && !(u->state & (UIP_CLIENT_CLOSE | UIP_CLIENT_REMOTECLOSED)))
             {
               memhandle newPacket = UIPEthernet.network.allocBlock(uip_len);
               if (newPacket != NOBLOCK)
@@ -390,17 +405,22 @@ finish_newdata:
         {
 #ifdef UIPETHERNET_DEBUG_CLIENT
           Serial.println(F("UIPClient uip_closed"));
+          _dumpAllData();
 #endif
           // drop outgoing packets not sent yet:
           _flushBlocks(&u->packets_out[0]);
           if (u->packets_in[0] != NOBLOCK)
             {
               ((uip_userdata_closed_t *)u)->lport = uip_conn->lport;
-              u->state |= UIP_CLIENT_CLOSED;
+              u->state |= UIP_CLIENT_REMOTECLOSED;
             }
           else
             u->state = 0;
           // disassociate appdata.
+#ifdef UIPETHERNET_DEBUG_CLIENT
+          Serial.println(F("after UIPClient uip_closed"));
+          _dumpAllData();
+#endif
           uip_conn->appstate = NULL;
           goto nodata;
         }
@@ -448,18 +468,25 @@ finish_newdata:
         {
 #ifdef UIPETHERNET_DEBUG_CLIENT
               Serial.print(F("UIPClient state UIP_CLIENT_CLOSE"));
+              _dumpAllData();
 #endif
           if (u->packets_out[0] == NOBLOCK)
             {
-#ifdef UIPETHERNET_DEBUG_CLIENT
-              Serial.print(F("UIPClient state UIP_CLIENT_CLOSE -> free userdata"));
-#endif
               u->state = 0;
               uip_conn->appstate = NULL;
               uip_close();
+#ifdef UIPETHERNET_DEBUG_CLIENT
+              Serial.print(F("no blocks out -> free userdata"));
+              _dumpAllData();
+#endif
             }
           else
-            uip_stop();
+            {
+              uip_stop();
+#ifdef UIPETHERNET_DEBUG_CLIENT
+              Serial.print(F("blocks outstanding transfer -> uip_stop()"));
+#endif
+            }
         }
     }
 nodata:
@@ -505,13 +532,13 @@ UIPClient::_eatBlock(memhandle* block)
   memhandle* start = block;
   Serial.print(F("eatblock("));
   Serial.print(*block);
-  Serial.print("): ");
+  Serial.print(F("): "));
   for (uint8_t i = 0; i < UIP_SOCKET_NUMPACKETS; i++)
     {
       Serial.print(start[i]);
-      Serial.print(" ");
+      Serial.print(F(" "));
     }
-  Serial.print("-> ");
+  Serial.print(F("-> "));
 #endif
   memhandle* end = block+(UIP_SOCKET_NUMPACKETS-1);
   UIPEthernet.network.freeBlock(*block);
@@ -543,3 +570,39 @@ UIPClient::_flushBlocks(memhandle* block)
     }
 }
 
+#ifdef UIPETHERNET_DEBUG_CLIENT
+void
+UIPClient::_dumpAllData() {
+  for (uint8_t i=0; i < UIP_CONNS; i++)
+    {
+      Serial.print(F("UIPClient::all_data["));
+      Serial.print(i);
+      Serial.print(F("], state:"));
+      Serial.println(all_data[i].state, BIN);
+      Serial.print(F("packets_in: "));
+      for (uint8_t j=0; j < UIP_SOCKET_NUMPACKETS; j++)
+        {
+          Serial.print(all_data[i].packets_in[j]);
+          Serial.print(F(" "));
+        }
+      Serial.println();
+      if (all_data[i].state & UIP_CLIENT_REMOTECLOSED)
+        {
+          Serial.print(F("state remote closed, local port: "));
+          Serial.println(htons(((uip_userdata_closed_t *)(&all_data[i]))->lport));
+        }
+      else
+        {
+          Serial.print(F("packets_out: "));
+          for (uint8_t j=0; j < UIP_SOCKET_NUMPACKETS; j++)
+            {
+              Serial.print(all_data[i].packets_out[j]);
+              Serial.print(F(" "));
+            }
+          Serial.println();
+          Serial.print(F("out_pos: "));
+          Serial.println(all_data[i].out_pos);
+        }
+    }
+}
+#endif
