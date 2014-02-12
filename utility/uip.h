@@ -54,6 +54,7 @@
 #define __UIP_H__
 
 #include "uipopt.h"
+#include "util.h"
 
 /**
  * Repressentation of an IP address.
@@ -1080,12 +1081,12 @@ struct uip_udp_conn *uip_udp_new(uip_ipaddr_t *ripaddr, u16_t rport);
  * byte order to network byte order. For converting constants to
  * network byte order, use the HTONS() macro instead.
  */
-#ifndef htons
-u16_t htons(u16_t val);
-#endif /* htons */
-#ifndef ntohs
-#define ntohs htons
-#endif
+                    //#ifndef htons
+                    //u16_t htons(u16_t val);
+                    //#endif /* htons */
+                    //#ifndef ntohs
+                    //#define ntohs htons
+                    //#endif
 
 /** @} */
 
