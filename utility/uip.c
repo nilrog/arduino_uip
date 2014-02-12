@@ -1878,11 +1878,11 @@ uip_process(u8_t flag)
   return;
 }
 /*---------------------------------------------------------------------------*/
-u16_t
-htons(u16_t val)
-{
-  return HTONS(val);
-}
+//u16_t
+//htons(u16_t val)
+//{
+//  return HTONS(val);
+//}
 /*---------------------------------------------------------------------------*/
 void
 uip_send(const void *data, int len)
