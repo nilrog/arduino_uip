@@ -61,6 +61,9 @@ UIPClient::connect(IPAddress ip, uint16_t port)
   struct uip_conn* conn = uip_connect(&ipaddr, htons(port));
   if (conn)
     {
+#if UIP_CONNECT_TIMEOUT > 0
+      int32_t timeout = millis() + 1000 * UIP_CONNECT_TIMEOUT;
+#endif
       while((conn->tcpstateflags & UIP_TS_MASK) != UIP_CLOSED)
         {
           UIPEthernetClass::tick();
@@ -75,6 +78,13 @@ UIPClient::connect(IPAddress ip, uint16_t port)
 #endif
               return 1;
             }
+#if UIP_CONNECT_TIMEOUT > 0
+          if (((int32_t)(millis() - timeout)) > 0)
+            {
+              conn->tcpstateflags = UIP_CLOSED;
+              break;
+            }
+#endif
         }
     }
   return 0;
@@ -327,7 +337,7 @@ uipclient_appcall(void)
     {
 #ifdef UIPETHERNET_DEBUG_CLIENT
       Serial.println(F("UIPClient uip_connected"));
-      _dumpAllData();
+      UIPClient::_dumpAllData();
 #endif
       u = (uip_userdata_t*) UIPClient::_allocateData();
       if (u)
@@ -383,7 +393,7 @@ finish_newdata:
         {
 #ifdef UIPETHERNET_DEBUG_CLIENT
           Serial.println(F("UIPClient uip_closed"));
-          _dumpAllData();
+          UIPClient::_dumpAllData();
 #endif
           // drop outgoing packets not sent yet:
           UIPClient::_flushBlocks(&u->packets_out[0]);
@@ -397,7 +407,7 @@ finish_newdata:
           // disassociate appdata.
 #ifdef UIPETHERNET_DEBUG_CLIENT
           Serial.println(F("after UIPClient uip_closed"));
-          _dumpAllData();
+          UIPClient::_dumpAllData();
 #endif
           uip_conn->appstate = NULL;
           goto nodata;
@@ -444,8 +454,8 @@ finish_newdata:
       if (u->state & UIP_CLIENT_CLOSE)
         {
 #ifdef UIPETHERNET_DEBUG_CLIENT
-              Serial.print(F("UIPClient state UIP_CLIENT_CLOSE"));
-              _dumpAllData();
+          Serial.println(F("UIPClient state UIP_CLIENT_CLOSE"));
+          UIPClient::_dumpAllData();
 #endif
           if (u->packets_out[0] == NOBLOCK)
             {
@@ -453,15 +463,15 @@ finish_newdata:
               uip_conn->appstate = NULL;
               uip_close();
 #ifdef UIPETHERNET_DEBUG_CLIENT
-              Serial.print(F("no blocks out -> free userdata"));
-              _dumpAllData();
+              Serial.println(F("no blocks out -> free userdata"));
+              UIPClient::_dumpAllData();
 #endif
             }
           else
             {
               uip_stop();
 #ifdef UIPETHERNET_DEBUG_CLIENT
-              Serial.print(F("blocks outstanding transfer -> uip_stop()"));
+              Serial.println(F("blocks outstanding transfer -> uip_stop()"));
 #endif
             }
         }
@@ -541,6 +551,7 @@ UIPClient::_flushBlocks(memhandle* block)
   for (uint8_t i = 0; i < UIP_SOCKET_NUMPACKETS; i++)
     {
       Enc28J60Network::freeBlock(block[i]);
+      block[i] = NOBLOCK;
     }
 }
 
